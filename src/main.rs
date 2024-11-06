@@ -102,17 +102,25 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Session { command }) => match command {
-            SessionCommands::Start { name: _, profile: _, plan: _, log_level: _, tracing: _ } => {
+            SessionCommands::Start { name, profile, plan, log_level, tracing } => {
                 println!("Starting session...");
-                // TODO: Implement session start
+                let mut session = rust_goose::session::SessionLoop::new(
+                    name.unwrap_or_else(|| rust_goose::utils::generate_name()),
+                    profile,
+                );
+                session.run(true).unwrap();
             }
             SessionCommands::List => {
                 println!("Listing sessions...");
                 // TODO: Implement session list
             }
-            SessionCommands::Resume { name: _, profile: _, log_level: _ } => {
+            SessionCommands::Resume { name, profile, log_level } => {
                 println!("Resuming session...");
-                // TODO: Implement session resume
+                let mut session = rust_goose::session::SessionLoop::new(
+                    name.unwrap_or_else(|| rust_goose::utils::generate_name()),
+                    profile,
+                );
+                session.run(false).unwrap();
             }
             SessionCommands::Clear { keep: _ } => {
                 println!("Clearing old sessions...");

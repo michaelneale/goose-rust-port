@@ -9,13 +9,13 @@ pub const SESSION_FILE_SUFFIX: &str = ".jsonl";
 pub const LOG_PATH: &str = "~/.config/goose/logs";
 pub const RECOMMENDED_DEFAULT_PROVIDER: &str = "openai";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
     // TODO: Define profile structure
 }
 
 pub fn session_path(name: &str) -> PathBuf {
-    let mut path = shellexpand::tilde(SESSIONS_PATH).into_owned().into();
+    let mut path: PathBuf = shellexpand::tilde(SESSIONS_PATH).into_owned().into();
     std::fs::create_dir_all(&path).unwrap();
     path.push(format!("{}{}", name, SESSION_FILE_SUFFIX));
     path

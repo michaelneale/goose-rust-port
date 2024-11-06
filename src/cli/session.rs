@@ -88,6 +88,5 @@ impl Session {
 }
 
 fn generate_name() -> String {
-    // TODO: Implement name generation
-    "default".to_string()
+    crate::utils::generate_name()
 }

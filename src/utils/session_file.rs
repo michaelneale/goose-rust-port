@@ -68,6 +68,8 @@ pub fn session_file_exists(session_files_directory: &Path) -> bool {
         .unwrap_or(false)
 }
 
+use std::io::Write;
+
 pub fn log_messages(file_path: &Path, messages: &[Message]) -> Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .append(true)

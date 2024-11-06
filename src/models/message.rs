@@ -88,6 +88,18 @@ impl Message {
             .collect()
     }
 
+    pub fn is_user(&self) -> bool {
+        matches!(self.role, Role::User)
+    }
+
+    pub fn is_assistant(&self) -> bool {
+        matches!(self.role, Role::Assistant)
+    }
+
+    pub fn has_tool_use(&self) -> bool {
+        self.content.iter().any(|c| matches!(c, Content::ToolUse { .. }))
+    }
+
     pub fn validate(&self) -> Result<()> {
         match self.role {
             Role::User => {
