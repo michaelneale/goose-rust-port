@@ -5,7 +5,7 @@ use std::io::Write;
 use anyhow::{Result, Context};
 use chrono::DateTime;
 use colored::*;
-use log::{info, error};
+use log::{info, error, debug};
 use tokio::sync::Mutex;
 
 use crate::exchange::{Exchange, Message, create_provider};
@@ -82,6 +82,12 @@ impl Session {
         println!("{}", format!("starting session | name: {} profile: {}", 
             self.name.cyan(), profile.cyan()).dimmed());
 
+        // Initialize exchange if not already done
+        if self.exchange.is_none() {
+            let provider = create_provider("openai")?;
+            self.exchange = Some(Exchange::new(provider).await?);
+        }
+
         // Main interaction loop
         loop {
             // Check for interruption
@@ -92,14 +98,34 @@ impl Session {
 
             // Get user input using the input handler
             let mut input_handler = create_default_input_handler();
+            debug!("Getting user input...");
             let input = input_handler.get_user_input()?;
+            
+            debug!("Got user input: {}", input.text);
+            print!("Thinking... ");
+            std::io::stdout().flush()?;
             if input.to_exit() {
                 break;
             }
 
             // Process the message
             let message = Message::user(&input.text);
-            self.process_message(message).await?;
+            if let Some(exchange) = &self.exchange {
+                // Add message to history
+                exchange.add_message(message.clone()).await?;
+                
+                // Generate response
+                let response = exchange.generate(&[message]).await?;
+                println!("\r"); // Clear the thinking indicator
+                
+                if !response.text().is_empty() {
+                    println!("{}", response.text());
+                }
+                
+                // Update stats
+                self.stats.add_message();
+                self.stats.add_tokens(exchange.get_token_usage().await);
+            }
         }
         
         let time_end = chrono::Utc::now();

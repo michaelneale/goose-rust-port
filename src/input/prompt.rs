@@ -33,14 +33,30 @@ impl GoosePrompt {
     }
 
     fn get_prompt(&self) -> String {
-        format!("{} ", "❯".green().bold())
+        format!("\r{} ", "❯".green().bold())
     }
 }
 
 impl InputHandler for GoosePrompt {
     fn get_user_input(&mut self) -> Result<UserInput> {
         let prompt = self.get_prompt();
-        match self.editor.readline(&prompt) {
+        
+        // Check if we're in a terminal
+        let in_terminal = atty::is(atty::Stream::Stdin);
+        if !in_terminal {
+            // If not in terminal, use standard input
+            print!("{}", prompt);
+            stdout().flush()?;
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            return Ok(UserInput { text: input.trim().to_string() });
+        }
+        
+        // In terminal, use rustyline
+        print!("{}", prompt);
+        stdout().flush()?;
+        
+        match self.editor.readline("") {
             Ok(line) => {
                 self.editor.add_history_entry(&line)?;
                 Ok(UserInput { text: line })

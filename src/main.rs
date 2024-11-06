@@ -108,6 +108,9 @@ enum ToolkitCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging
+    env_logger::init();
+    
     let cli = Cli::parse();
 
     if cli.version {
@@ -117,12 +120,15 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Session { command }) => match command {
-            SessionCommands::Start { name, profile, plan, log_level, tracing } => {
+            SessionCommands::Start { name, profile, plan: _, log_level: _, tracing: _ } => {
                 println!("Starting session...");
-                let mut session = rust_goose::session::SessionLoop::new(
-                    name.unwrap_or_else(|| rust_goose::utils::generate_name()),
+                let mut session = rust_goose::cli::session::Session::new(
+                    name,
                     profile,
-                );
+                    None,
+                    Some("INFO".to_string()),
+                    false,
+                ).await.unwrap();
                 session.run(true).await.unwrap();
             }
             SessionCommands::List => {
