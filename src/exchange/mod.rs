@@ -7,7 +7,7 @@ pub use crate::models::Message;
 mod message;
 pub use message::Content;
 mod openai;
-pub use openai::{OpenAIConfig, OpenAIProvider};
+pub use openai::{OpenAIOptions, OpenAIProvider};
 
 /// Trait for LLM providers
 #[async_trait]

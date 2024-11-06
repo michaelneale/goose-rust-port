@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::io::Write;
 use anyhow::{Result, Context};
 use chrono::DateTime;
 use colored::*;
@@ -149,14 +150,23 @@ impl Session {
         
         // Process through exchange if available
         if let Some(exchange) = &self.exchange {
+            // Show thinking indicator
+            print!("Thinking... ");
+            std::io::stdout().flush()?;
+
+            // Generate response
             let response = exchange.generate(&self.messages).await?;
+            println!("\r"); // Clear the thinking indicator
+
+            // Add response to history
             self.messages.push(response.clone());
             
             // Update token usage
             self.stats.add_tokens(exchange.get_token_usage().await);
             
-            // Display response
+            // Display response using markdown formatting
             if !response.text().is_empty() {
+                // TODO: Add markdown rendering support
                 println!("{}", response.text());
             }
         }

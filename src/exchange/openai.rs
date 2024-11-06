@@ -1,81 +1,130 @@
 use std::env;
+use std::sync::atomic::{AtomicU32, Ordering};
 use anyhow::{Context, Result};
 use async_openai::{
-    types::{ChatCompletionRequestMessage, CreateChatCompletionRequest, Role},
+    config::{Config, OpenAIConfig},
+    types::{
+        ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPart, 
+        CreateChatCompletionRequest, Role,
+        ChatCompletionRequestUserMessage, ChatCompletionRequestAssistantMessage,
+        ChatCompletionRequestSystemMessage,
+    },
     Client,
 };
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use log::{debug};
 
+use crate::exchange::Provider;
 use crate::models::Message;
-use super::Provider;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenAIConfig {
+// Configuration options for OpenAI provider
+#[derive(Debug, Clone)]
+pub struct OpenAIOptions {
     pub model: String,
     pub temperature: f32,
     pub max_tokens: u16,
+    pub system_prompt: Option<String>,
 }
 
-impl Default for OpenAIConfig {
+impl Default for OpenAIOptions {
     fn default() -> Self {
         Self {
             model: "gpt-4".to_string(),
             temperature: 0.7,
             max_tokens: 2048,
+            system_prompt: None,
         }
     }
 }
 
 pub struct OpenAIProvider {
-    client: Client<async_openai::config::OpenAIConfig>,
-    config: OpenAIConfig,
-    last_token_usage: std::sync::atomic::AtomicU32,
+    client: Client<OpenAIConfig>,
+    options: OpenAIOptions,
+    last_token_usage: AtomicU32,
 }
 
 impl OpenAIProvider {
-    pub fn new(config: Option<OpenAIConfig>) -> Result<Self> {
+    pub fn new(options: Option<OpenAIOptions>) -> Result<Self> {
         // Check for API key
-        let _api_key = env::var("OPENAI_API_KEY")
+        let api_key = env::var("OPENAI_API_KEY")
             .context("OPENAI_API_KEY environment variable not set")?;
 
+        let config = OpenAIConfig::new().with_api_key(api_key);
+        
         Ok(Self {
-            client: Client::new(),
-            config: config.unwrap_or_default(),
-            last_token_usage: std::sync::atomic::AtomicU32::new(0),
+            client: Client::with_config(config),
+            options: options.unwrap_or_default(),
+            last_token_usage: AtomicU32::new(0),
         })
     }
 
     fn convert_message_to_openai(message: &Message) -> ChatCompletionRequestMessage {
-        ChatCompletionRequestMessage::User(
-            async_openai::types::ChatCompletionRequestUserMessage {
-                content: Some(async_openai::types::ChatCompletionRequestUserMessageContent::Text(message.text())),
-                name: None,
-                role: Role::User,
+        match message.role {
+            crate::models::message::Role::User => {
+                ChatCompletionRequestMessage::User(
+                    ChatCompletionRequestUserMessage {
+                        content: Some(vec![ChatCompletionRequestMessageContentPart::Text(message.text().into())].into()),
+                        name: None,
+                        role: Role::User,
+                    }
+                )
             }
-        )
+            crate::models::message::Role::Assistant => {
+                ChatCompletionRequestMessage::Assistant(
+                    ChatCompletionRequestAssistantMessage {
+                        content: Some(message.text()),
+                        name: None,
+                        role: Role::Assistant,
+                        function_call: None,
+                        tool_calls: None,
+                    }
+                )
+            }
+        }
+    }
+
+    fn create_system_message(&self) -> Option<ChatCompletionRequestMessage> {
+        self.options.system_prompt.as_ref().map(|prompt| {
+            ChatCompletionRequestMessage::System(
+                ChatCompletionRequestSystemMessage {
+                    content: Some(prompt.clone()),
+                    name: None,
+                    role: Role::System,
+                }
+            )
+        })
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Provider for OpenAIProvider {
     async fn initialize(&mut self) -> Result<()> {
-        // No initialization needed for OpenAI
+        debug!("Initializing OpenAI provider with model: {}", self.options.model);
         Ok(())
     }
-
+    
     async fn generate(&self, messages: &[Message]) -> Result<Message> {
-        let request = CreateChatCompletionRequest {
-            model: self.config.model.clone(),
-            messages: messages
-                .iter()
+        let mut openai_messages = Vec::new();
+        
+        // Add system message if configured
+        if let Some(system_msg) = self.create_system_message() {
+            openai_messages.push(system_msg);
+        }
+
+        // Add conversation history
+        openai_messages.extend(
+            messages.iter()
                 .map(Self::convert_message_to_openai)
-                .collect(),
-            temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens as u16),
+        );
+
+        let request = CreateChatCompletionRequest {
+            model: self.options.model.clone(),
+            messages: openai_messages,
+            temperature: Some(self.options.temperature),
+            max_tokens: Some(self.options.max_tokens),
             ..Default::default()
         };
 
+        debug!("Sending request to OpenAI API");
         let response = self.client
             .chat()
             .create(request)
@@ -84,7 +133,8 @@ impl Provider for OpenAIProvider {
 
         // Update token usage tracking
         if let Some(usage) = response.usage {
-            self.last_token_usage.store(usage.total_tokens, std::sync::atomic::Ordering::SeqCst);
+            self.last_token_usage.store(usage.total_tokens, Ordering::SeqCst);
+            debug!("Token usage for request: {}", usage.total_tokens);
         }
 
         // Extract the response content
@@ -95,11 +145,12 @@ impl Provider for OpenAIProvider {
             .context("No content in response")?
             .clone();
 
+        debug!("Received response from OpenAI API");
         Ok(Message::assistant(&content))
     }
 
     fn get_token_usage(&self) -> u32 {
-        self.last_token_usage.load(std::sync::atomic::Ordering::SeqCst)
+        self.last_token_usage.load(Ordering::SeqCst)
     }
 }
 
@@ -109,13 +160,50 @@ mod tests {
     use dotenv::dotenv;
 
     #[tokio::test]
-    async fn test_openai_provider() {
-        dotenv().ok(); // Load .env file if present
+    async fn test_openai_conversation() -> Result<()> {
+        // Load environment variables
+        dotenv().ok();
 
-        let provider = OpenAIProvider::new(None).unwrap();
+        // Create provider with test options
+        let options = OpenAIOptions {
+            model: "gpt-4".to_string(),
+            temperature: 0.7,
+            max_tokens: 2048,
+            system_prompt: Some("You are a helpful assistant.".to_string()),
+        };
+        let provider = OpenAIProvider::new(Some(options)).unwrap();
+        
+        // Test a simple conversation
         let messages = vec![Message::user("Hello!")];
         
-        let response = provider.generate(&messages).await.unwrap();
+        let response = provider.generate(&messages).await?;
         assert!(!response.text().is_empty());
+        
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_message_conversion() {
+        let user_msg = Message::user("Hello");
+        let assistant_msg = Message::assistant("Hi there");
+
+        let openai_user = OpenAIProvider::convert_message_to_openai(&user_msg);
+        let openai_assistant = OpenAIProvider::convert_message_to_openai(&assistant_msg);
+
+        match openai_user {
+            ChatCompletionRequestMessage::User(msg) => {
+                assert_eq!(msg.role, Role::User);
+                assert!(msg.content.is_some());
+            }
+            _ => panic!("Expected User message"),
+        }
+
+        match openai_assistant {
+            ChatCompletionRequestMessage::Assistant(msg) => {
+                assert_eq!(msg.role, Role::Assistant);
+                assert_eq!(msg.content.unwrap(), "Hi there");
+            }
+            _ => panic!("Expected Assistant message"),
+        }
     }
 }
