@@ -9,12 +9,15 @@ use log::{info, error};
 use crate::exchange::Message;
 use crate::input::{create_default_input_handler, InputHandler};
 use crate::cli::config::LOG_PATH;
+use crate::stats::{SessionStats, StatsTracker};
 
 pub struct SessionLoop {
     messages: Vec<Message>,
     interrupted: Arc<AtomicBool>,
     name: String,
     profile_name: Option<String>,
+    stats: SessionStats,
+    stats_tracker: Arc<Mutex<StatsTracker>>,
 }
 
 impl SessionLoop {
@@ -26,11 +29,16 @@ impl SessionLoop {
             int_handler.store(true, Ordering::SeqCst);
         }).expect("Error setting Ctrl-C handler");
 
+        let stats = SessionStats::new(name.clone());
+        let stats_tracker = Arc::new(Mutex::new(StatsTracker::new()));
+
         Self {
             messages: Vec::new(),
             interrupted,
             name,
             profile_name,
+            stats,
+            stats_tracker,
         }
     }
 
@@ -40,6 +48,7 @@ impl SessionLoop {
         
         // Add message to history
         self.messages.push(message);
+        self.stats.add_message();
 
         // Check for interruption
         if self.interrupted.load(Ordering::SeqCst) {
@@ -50,10 +59,18 @@ impl SessionLoop {
         // TODO: Process the message through the exchange
         // This will involve:
         // 1. Sending message to LLM
-        // 2. Getting response
+        // 2. Getting response and updating token usage
         // 3. Processing any tool uses
         
         Ok(())
+    }
+
+    pub fn get_stats(&self) -> &SessionStats {
+        &self.stats
+    }
+
+    pub fn get_total_stats(&self) -> Result<SessionStats> {
+        Ok(self.stats_tracker.lock().unwrap().get_total_stats())
     }
 
     pub fn run(&mut self, new_session: bool) -> Result<()> {
@@ -123,13 +140,18 @@ impl SessionLoop {
         
         // Log statistics
         info!(
-            "Session {} completed. Duration: {}s, Messages: {}", 
+            "Session {} completed.\nDuration: {}s\nMessages: {}\nTokens: {}\nEstimated cost: ${:.4}", 
             self.name,
             duration.num_seconds(),
-            self.messages.len()
+            self.messages.len(),
+            self.stats.total_tokens,
+            self.stats.total_cost
         );
 
-        // TODO: Implement token usage and cost tracking
+        // Update stats tracker
+        let mut stats = self.stats.clone();
+        stats.complete();
+        self.stats_tracker.lock().unwrap().track_session(stats);
         
         Ok(())
     }

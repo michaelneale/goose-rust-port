@@ -3,6 +3,7 @@ pub mod exchange;
 pub mod input;
 pub mod models;
 pub mod session;
+pub mod stats;
 pub mod utils;
 
 // Re-export commonly used items

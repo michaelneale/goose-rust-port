@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use chrono::DateTime;
 use crate::utils::session_file::{Message, read_or_create_file, log_messages};
+use crate::stats::SessionStats;
 use crate::cli::config::{session_path, ensure_config};
 
 pub struct Session {

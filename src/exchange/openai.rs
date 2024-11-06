@@ -86,6 +86,14 @@ impl Provider for OpenAIProvider {
             .await
             .context("Failed to get response from OpenAI")?;
 
+        // Update token usage tracking
+        let usage = response.usage.as_ref()
+            .context("No usage information in response")?;
+        
+        // Update last_token_usage with total tokens
+        let mut this = self.to_owned();
+        this.last_token_usage = usage.total_tokens;
+
         // Extract the response content
         let content = response.choices[0]
             .message

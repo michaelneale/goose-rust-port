@@ -84,6 +84,20 @@ enum SessionCommands {
         #[arg(long, default_value = "3")]
         keep: u32,
     },
+    /// Show session statistics
+    Stats {
+        /// Session name (defaults to most recent)
+        name: Option<String>,
+        /// Show detailed token usage
+        #[arg(long)]
+        tokens: bool,
+        /// Show cost information
+        #[arg(long)]
+        cost: bool,
+        /// Show all sessions
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -125,6 +139,20 @@ fn main() -> Result<()> {
             SessionCommands::Clear { keep: _ } => {
                 println!("Clearing old sessions...");
                 // TODO: Implement session clear
+            }
+            SessionCommands::Stats { name, tokens, cost, all } => {
+                println!("Showing session statistics...");
+                let mut session = rust_goose::session::SessionLoop::new(
+                    name.unwrap_or_else(|| rust_goose::utils::generate_name()),
+                    None,
+                );
+                if all {
+                    if let Ok(total_stats) = session.get_total_stats() {
+                        println!("{}", total_stats.summary());
+                    }
+                } else {
+                    println!("{}", session.get_stats().summary());
+                }
             }
         },
         Some(Commands::Toolkit { command }) => match command {
