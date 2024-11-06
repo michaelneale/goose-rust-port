@@ -28,9 +28,9 @@ impl Default for OpenAIConfig {
 }
 
 pub struct OpenAIProvider {
-    client: Client,
+    client: Client<async_openai::config::OpenAIConfig>,
     config: OpenAIConfig,
-    last_token_usage: u32,
+    last_token_usage: std::sync::atomic::AtomicU32,
 }
 
 impl OpenAIProvider {
@@ -42,22 +42,18 @@ impl OpenAIProvider {
         Ok(Self {
             client: Client::new(),
             config: config.unwrap_or_default(),
-            last_token_usage: 0,
+            last_token_usage: std::sync::atomic::AtomicU32::new(0),
         })
     }
 
     fn convert_message_to_openai(message: &Message) -> ChatCompletionRequestMessage {
-        let role = match message.role {
-            crate::models::message::Role::User => Role::User,
-            crate::models::message::Role::Assistant => Role::Assistant,
-        };
-
-        ChatCompletionRequestMessage {
-            role,
-            content: Some(message.text()),
-            name: None,
-            function_call: None,
-        }
+        ChatCompletionRequestMessage::User(
+            async_openai::types::ChatCompletionRequestUserMessage {
+                content: Some(async_openai::types::ChatCompletionRequestUserMessageContent::Text(message.text())),
+                name: None,
+                role: Role::User,
+            }
+        )
     }
 }
 
@@ -87,12 +83,9 @@ impl Provider for OpenAIProvider {
             .context("Failed to get response from OpenAI")?;
 
         // Update token usage tracking
-        let usage = response.usage.as_ref()
-            .context("No usage information in response")?;
-        
-        // Update last_token_usage with total tokens
-        let mut this = self.to_owned();
-        this.last_token_usage = usage.total_tokens;
+        if let Some(usage) = response.usage {
+            self.last_token_usage.store(usage.total_tokens, std::sync::atomic::Ordering::SeqCst);
+        }
 
         // Extract the response content
         let content = response.choices[0]
@@ -106,7 +99,7 @@ impl Provider for OpenAIProvider {
     }
 
     fn get_token_usage(&self) -> u32 {
-        self.last_token_usage
+        self.last_token_usage.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 

@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use anyhow::{Result, Context};
 use chrono::{DateTime, Utc};
 use colored::*;
@@ -69,11 +70,11 @@ impl SessionLoop {
         &self.stats
     }
 
-    pub fn get_total_stats(&self) -> Result<SessionStats> {
-        Ok(self.stats_tracker.lock().unwrap().get_total_stats())
+    pub async fn get_total_stats(&self) -> Result<SessionStats> {
+        Ok(self.stats_tracker.lock().await.get_total_stats())
     }
 
-    pub fn run(&mut self, new_session: bool) -> Result<()> {
+    pub async fn run(&mut self, new_session: bool) -> Result<()> {
         let time_start = Utc::now();
         
         let profile = self.profile_name.as_deref().unwrap_or("default");
@@ -96,12 +97,12 @@ impl SessionLoop {
             }
 
             // Process the message
-            let message = Message::user(&input);
+            let message = Message::user(&input.text);
             self.process_message(message)?;
         }
         
         let time_end = Utc::now();
-        self.log_session_stats(time_start, time_end)?;
+        self.log_session_stats(time_start, time_end).await?;
         
         Ok(())
     }
@@ -130,7 +131,7 @@ impl SessionLoop {
         Ok(())
     }
 
-    fn log_session_stats(&self, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> Result<()> {
+    async fn log_session_stats(&self, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> Result<()> {
         // Ensure log directory exists
         std::fs::create_dir_all(LOG_PATH)
             .with_context(|| format!("Failed to create log directory at {}", LOG_PATH))?;
@@ -151,7 +152,7 @@ impl SessionLoop {
         // Update stats tracker
         let mut stats = self.stats.clone();
         stats.complete();
-        self.stats_tracker.lock().unwrap().track_session(stats);
+        self.stats_tracker.lock().await.track_session(stats);
         
         Ok(())
     }

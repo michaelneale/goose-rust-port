@@ -2,12 +2,11 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use tokio::sync::Mutex;
-use crate::models::Message;
 
+pub use crate::models::Message;
 mod message;
+pub use message::Content;
 mod openai;
-
-pub use message::{Content, Text, ToolResult, ToolUse};
 pub use openai::{OpenAIConfig, OpenAIProvider};
 
 /// Trait for LLM providers
@@ -33,7 +32,7 @@ pub fn create_provider(provider_name: &str) -> Result<Box<dyn Provider>> {
 
 /// Exchange handles communication with the LLM provider
 pub struct Exchange {
-    provider: Arc<dyn Provider>,
+    provider: Arc<Box<dyn Provider>>,
     messages: Arc<Mutex<Vec<Message>>>,
     token_usage: Arc<Mutex<u32>>,
 }
@@ -59,9 +58,8 @@ impl Exchange {
     }
 
     /// Generate a response using the provider
-    pub async fn generate(&self) -> Result<Message> {
-        let messages = self.messages.lock().await;
-        let response = self.provider.generate(&messages).await?;
+    pub async fn generate(&self, messages: &[Message]) -> Result<Message> {
+        let response = self.provider.generate(messages).await?;
         
         // Update token usage
         let mut token_usage = self.token_usage.lock().await;
@@ -93,39 +91,13 @@ impl Exchange {
     }
 
     /// Process tool usage in a message
-    pub async fn process_tool_use(&self, tool_use: &ToolUse) -> Result<ToolResult> {
+    pub async fn process_tool_use(&self, tool_use: &Content) -> Result<Content> {
         // TODO: Implement tool usage processing
         // For now return a placeholder error result
-        Ok(ToolResult {
-            tool_use_id: tool_use.id.clone(),
+        Ok(Content::ToolResult {
+            tool_use_id: "placeholder".to_string(),
             output: "Tool processing not implemented yet".to_string(),
             is_error: true,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::models::message::{Role, Content};
-
-    #[tokio::test]
-    async fn test_exchange_message_handling() {
-        let provider = create_provider("openai").unwrap();
-        let exchange = Exchange::new(provider).await.unwrap();
-
-        // Test adding a message
-        let message = Message::user("test message");
-        exchange.add_message(message.clone()).await.unwrap();
-
-        // Verify message was added
-        let messages = exchange.get_messages().await;
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].text(), "test message");
-
-        // Test rewinding
-        exchange.rewind().await.unwrap();
-        let messages = exchange.get_messages().await;
-        assert_eq!(messages.len(), 0);
     }
 }

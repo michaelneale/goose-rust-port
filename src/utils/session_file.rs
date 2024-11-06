@@ -17,7 +17,7 @@ pub fn is_empty_session(path: &Path) -> bool {
     path.is_file() && path.metadata().map(|m| m.len() == 0).unwrap_or(false)
 }
 
-pub fn read_or_create_file(file_path: &Path) -> Result<Vec<Message>> {
+pub fn read_or_create_file(file_path: &Path) -> Result<Vec<crate::models::Message>> {
     if file_path.exists() {
         read_from_file(file_path)
     } else {
@@ -26,7 +26,7 @@ pub fn read_or_create_file(file_path: &Path) -> Result<Vec<Message>> {
     }
 }
 
-pub fn read_from_file(file_path: &Path) -> Result<Vec<Message>> {
+pub fn read_from_file(file_path: &Path) -> Result<Vec<crate::models::Message>> {
     let content = std::fs::read_to_string(file_path)?;
     let messages = content
         .lines()

@@ -106,7 +106,8 @@ enum ToolkitCommands {
     List,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.version {
@@ -122,7 +123,7 @@ fn main() -> Result<()> {
                     name.unwrap_or_else(|| rust_goose::utils::generate_name()),
                     profile,
                 );
-                session.run(true).unwrap();
+                session.run(true).await.unwrap();
             }
             SessionCommands::List => {
                 println!("Listing sessions...");
@@ -134,7 +135,7 @@ fn main() -> Result<()> {
                     name.unwrap_or_else(|| rust_goose::utils::generate_name()),
                     profile,
                 );
-                session.run(false).unwrap();
+                session.run(false).await.unwrap();
             }
             SessionCommands::Clear { keep: _ } => {
                 println!("Clearing old sessions...");
@@ -147,7 +148,7 @@ fn main() -> Result<()> {
                     None,
                 );
                 if all {
-                    if let Ok(total_stats) = session.get_total_stats() {
+                    if let Ok(total_stats) = session.get_total_stats().await {
                         println!("{}", total_stats.summary());
                     }
                 } else {
