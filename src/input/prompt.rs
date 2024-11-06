@@ -33,7 +33,7 @@ impl GoosePrompt {
     }
 
     fn get_prompt(&self) -> String {
-        format!("\r{} ", "❯".green().bold())
+        format!("{} ", "❯".green().bold())
     }
 }
 

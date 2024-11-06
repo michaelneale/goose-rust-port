@@ -33,7 +33,7 @@ async fn test_openai_conversation() -> Result<()> {
     // Test a simple conversation
     let messages = vec![Message::user("Hello!")];
     
-    let response = provider.generate(&messages).await?;
+    let response = provider.generate(&messages, None).await?;
     assert!(!response.text().is_empty());
     
     Ok(())
@@ -50,7 +50,7 @@ async fn test_openai_error_handling() -> Result<()> {
     let provider = OpenAIProvider::new(None)?;
     let messages = vec![Message::user("Hello")];
     
-    let result = provider.generate(&messages).await;
+    let result = provider.generate(&messages, None).await;
     assert!(result.is_err());
 
     // Restore original API key if it existed

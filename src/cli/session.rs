@@ -5,14 +5,14 @@ use std::io::Write;
 use anyhow::{Result, Context};
 use chrono::DateTime;
 use colored::*;
-use log::{info, error, debug};
-use tokio::sync::Mutex;
+use log::{info, debug};
 
 use crate::exchange::{Exchange, Message, create_provider};
 use crate::input::{create_default_input_handler, InputHandler};
 use crate::stats::SessionStats;
-use crate::cli::config::{session_path, ensure_config, LOG_PATH};
-use crate::utils::session_file::{read_or_create_file, log_messages};
+use crate::cli::config::{session_path, LOG_PATH};
+use crate::utils::session_file::read_or_create_file;
+use crate::toolkit::{Tool, Toolkit};
 
 pub struct Session {
     pub name: String,
@@ -23,6 +23,7 @@ pub struct Session {
     pub interrupted: Arc<AtomicBool>,
     pub exchange: Option<Exchange>,
     pub stats: SessionStats,
+    pub toolkits: Vec<Box<dyn Toolkit>>,
 }
 
 impl Session {
@@ -30,7 +31,7 @@ impl Session {
         name: Option<String>, 
         profile: Option<String>,
         plan: Option<serde_yaml::Value>,
-        log_level: Option<String>,
+        _log_level: Option<String>,
         tracing: bool,
     ) -> Result<Self> {
         let name = name.unwrap_or_else(|| generate_name());
@@ -60,6 +61,7 @@ impl Session {
             interrupted,
             exchange: None,
             stats,
+            toolkits: crate::toolkit::get_default_toolkits(),
         };
 
         session.messages.extend(session.load_session()?);
@@ -75,7 +77,7 @@ impl Session {
         Ok(session)
     }
 
-    pub async fn run(&mut self, new_session: bool) -> Result<()> {
+    pub async fn run(&mut self, _new_session: bool) -> Result<()> {
         let time_start = chrono::Utc::now();
         
         let profile = self.profile_name.as_deref().unwrap_or("default");
@@ -115,7 +117,23 @@ impl Session {
                 exchange.add_message(message.clone()).await?;
                 
                 // Generate response
-                let response = exchange.generate(&[message]).await?;
+                // Collect all available tools from registered toolkits
+                let tools: Vec<Tool> = self.toolkits.iter()
+                    .flat_map(|toolkit| toolkit.tools())
+                    .collect();
+                
+                let response = exchange.generate(&[message], Some(tools)).await?;
+                
+                // Process any tool uses in the response
+                // TODO: Implement tool use handling
+                // Currently disabled as we're working on the implementation
+                /*if response.has_tool_use() {
+                    for tool_use in response.tool_use() {
+                        if let Ok(result) = exchange.process_tool_use(tool_use).await {
+                            println!("Tool result: {}", result);
+                        }
+                    }
+                }*/
                 println!("\r"); // Clear the thinking indicator
                 
                 if !response.text().is_empty() {
@@ -134,7 +152,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn single_pass(&mut self, initial_message: String) -> Result<()> {
+    pub fn single_pass(&mut self, _initial_message: String) -> Result<()> {
         let profile = self.profile_name.as_deref().unwrap_or("default");
         println!("starting session | name: {} profile: {}", self.name, profile);
         println!("saving to {}", self.session_file_path.display());
@@ -151,7 +169,7 @@ impl Session {
         read_or_create_file(&self.session_file_path)
     }
 
-    fn setup_plan(&mut self, plan: serde_yaml::Value) -> Result<()> {
+    fn setup_plan(&mut self, _plan: serde_yaml::Value) -> Result<()> {
         if !self.messages.is_empty() {
             return Err(anyhow::anyhow!("The plan can only be set on an empty session."));
         }
@@ -181,7 +199,7 @@ impl Session {
             std::io::stdout().flush()?;
 
             // Generate response
-            let response = exchange.generate(&self.messages).await?;
+            let response = exchange.generate(&self.messages, None).await?;
             println!("\r"); // Clear the thinking indicator
 
             // Add response to history

@@ -7,14 +7,16 @@ use async_openai::{
         ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPart, 
         CreateChatCompletionRequest, Role,
         ChatCompletionRequestUserMessage, ChatCompletionRequestAssistantMessage,
-        ChatCompletionRequestSystemMessage,
+        ChatCompletionRequestSystemMessage, ChatCompletionTool,
+        ChatCompletionFunctions,
     },
     Client,
 };
-use log::{debug};
+use log::debug;
 
 use crate::exchange::Provider;
 use crate::models::Message;
+use crate::toolkit::Tool;
 
 // Configuration options for OpenAI provider
 #[derive(Debug, Clone)]
@@ -102,7 +104,7 @@ impl Provider for OpenAIProvider {
         Ok(())
     }
     
-    async fn generate(&self, messages: &[Message]) -> Result<Message> {
+    async fn generate(&self, messages: &[Message], tools: Option<Vec<Tool>>) -> Result<Message> {
         let mut openai_messages = Vec::new();
         
         // Add system message if configured
@@ -116,13 +118,27 @@ impl Provider for OpenAIProvider {
                 .map(Self::convert_message_to_openai)
         );
 
-        let request = CreateChatCompletionRequest {
+        let mut request = CreateChatCompletionRequest {
             model: self.options.model.clone(),
             messages: openai_messages,
             temperature: Some(self.options.temperature),
             max_tokens: Some(self.options.max_tokens),
             ..Default::default()
         };
+
+        // Add tools if provided
+        if let Some(tools) = tools {
+            request.tools = Some(tools.into_iter().map(|tool| {
+                ChatCompletionTool {
+                    r#type: async_openai::types::ChatCompletionToolType::Function,
+                    function: ChatCompletionFunctions {
+                        name: tool.name,
+                        description: Some(tool.description),
+                        parameters: tool.parameters,
+                    },
+                }
+            }).collect());
+        }
 
         debug!("Sending request to OpenAI API");
         let response = self.client
@@ -137,16 +153,25 @@ impl Provider for OpenAIProvider {
             debug!("Token usage for request: {}", usage.total_tokens);
         }
 
-        // Extract the response content
-        let content = response.choices[0]
-            .message
-            .content
-            .as_ref()
-            .context("No content in response")?
-            .clone();
-
-        debug!("Received response from OpenAI API");
-        Ok(Message::assistant(&content))
+        // Extract the response content or tool calls
+        let message = &response.choices[0].message;
+        
+        if let Some(tool_calls) = &message.tool_calls {
+            debug!("Received tool call response from OpenAI API");
+            // Convert tool calls into our message format
+            let mut content = String::new();
+            for tool_call in tool_calls {
+                content.push_str(&format!("Tool call: {}\nParameters: {}\n", 
+                    tool_call.function.name,
+                    tool_call.function.arguments));
+            }
+            Ok(Message::assistant(&content))
+        } else if let Some(content) = &message.content {
+            debug!("Received text response from OpenAI API");
+            Ok(Message::assistant(content))
+        } else {
+            Err(anyhow::anyhow!("Response contained neither content nor tool calls"))
+        }
     }
 
     fn get_token_usage(&self) -> u32 {
@@ -176,7 +201,45 @@ mod tests {
         // Test a simple conversation
         let messages = vec![Message::user("Hello!")];
         
-        let response = provider.generate(&messages).await?;
+        let response = provider.generate(&messages, None).await?;
+        assert!(!response.text().is_empty());
+        
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_openai_tool_response() -> Result<()> {
+        dotenv().ok();
+
+        let options = OpenAIOptions {
+            model: "gpt-4".to_string(),
+            temperature: 0.7,
+            max_tokens: 2048,
+            system_prompt: None,
+        };
+        let provider = OpenAIProvider::new(Some(options)).unwrap();
+
+        // Create a test tool
+        let tool = Tool::new(
+            "test_tool",
+            "A test tool",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "test_param": {
+                        "type": "string",
+                        "description": "A test parameter"
+                    }
+                }
+            }),
+            vec!["test_param".to_string()],
+        );
+
+        // Test conversation with tool
+        let messages = vec![Message::user("Use the test tool")];
+        let response = provider.generate(&messages, Some(vec![tool])).await?;
+        
+        // Response should contain either content or tool call info
         assert!(!response.text().is_empty());
         
         Ok(())

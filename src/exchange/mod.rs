@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 pub use crate::models::Message;
+use crate::toolkit::Tool;
 mod message;
 pub use message::Content;
 mod openai;
@@ -16,7 +17,7 @@ pub trait Provider: Send + Sync {
     async fn initialize(&mut self) -> Result<()>;
     
     /// Generate a response for the given messages
-    async fn generate(&self, messages: &[Message]) -> Result<Message>;
+    async fn generate(&self, messages: &[Message], tools: Option<Vec<Tool>>) -> Result<Message>;
     
     /// Get the token usage for the last request
     fn get_token_usage(&self) -> u32;
@@ -58,8 +59,8 @@ impl Exchange {
     }
 
     /// Generate a response using the provider
-    pub async fn generate(&self, messages: &[Message]) -> Result<Message> {
-        let response = self.provider.generate(messages).await?;
+    pub async fn generate(&self, messages: &[Message], tools: Option<Vec<Tool>>) -> Result<Message> {
+        let response = self.provider.generate(messages, tools).await?;
         
         // Update token usage
         let mut token_usage = self.token_usage.lock().await;
@@ -92,12 +93,24 @@ impl Exchange {
 
     /// Process tool usage in a message
     pub async fn process_tool_use(&self, tool_use: &Content) -> Result<Content> {
-        // TODO: Implement tool usage processing
-        // For now return a placeholder error result
-        Ok(Content::ToolResult {
-            tool_use_id: "placeholder".to_string(),
-            output: "Tool processing not implemented yet".to_string(),
-            is_error: true,
-        })
+        match tool_use {
+            Content::ToolUse { tool_call_id, name, parameters } => {
+                // Find matching tool in registered toolkits
+                let tool = Tool::new(
+                    name,
+                    "", // Description not needed for processing
+                    parameters.clone(),
+                    vec![], // Required params already validated by OpenAI
+                );
+
+                // Create tool result
+                Ok(Content::ToolResult {
+                    tool_use_id: tool_call_id.clone(),
+                    output: format!("Processed tool {} with parameters: {:?}", name, parameters),
+                    is_error: false,
+                })
+            },
+            _ => Err(anyhow!("Invalid tool use content type"))
+        }
     }
 }

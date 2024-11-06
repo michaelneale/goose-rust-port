@@ -4,6 +4,7 @@ pub mod input;
 pub mod models;
 pub mod session;
 pub mod stats;
+pub mod toolkit;
 pub mod utils;
 
 // Re-export commonly used items
