@@ -30,18 +30,18 @@ impl Toolkit for TestToolkit {
 #[tokio::test]
 async fn test_toolkit_basic() -> Result<()> {
     let tool = Tool::new(
-        "test_tool",
-        "A test tool",
+        "bash",
+        "Execute a bash command",
         json!({
             "type": "object",
             "properties": {
-                "test_param": {
+                "command": {
                     "type": "string",
-                    "description": "A test parameter"
+                    "description": "The command to execute"
                 }
             }
         }),
-        vec!["test_param".to_string()],
+        vec!["command".to_string()],
     );
 
     let toolkit = TestToolkit {
@@ -53,11 +53,32 @@ async fn test_toolkit_basic() -> Result<()> {
 
     // Test tool validation
     assert!(!tool.validate_parameters(&json!({})));
-    assert!(tool.validate_parameters(&json!({"test_param": "test"})));
+    assert!(tool.validate_parameters(&json!({"command": "echo test"})));
 
     // Test tool processing
     let result = toolkit.process_tool(&tool).await?;
     assert!(!result.text().is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_toolkit_bash_execution() -> Result<()> {
+    use rust_goose::toolkit::default::DefaultToolkit;
+
+    let tool = Tool::new(
+        "bash",
+        "Execute a bash command",
+        json!({
+            "command": "echo 'Hello, World!'"
+        }),
+        vec!["command".to_string()],
+    );
+
+    let toolkit = DefaultToolkit::new();
+    let result = toolkit.process_tool(&tool).await?;
+    
+    assert_eq!(result.text().trim(), "Hello, World!");
 
     Ok(())
 }

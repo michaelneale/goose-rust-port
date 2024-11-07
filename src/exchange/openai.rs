@@ -16,7 +16,7 @@ use log::debug;
 
 use crate::exchange::Provider;
 use crate::models::Message;
-use crate::toolkit::Tool;
+use crate::toolkit::{Tool, Toolkit};
 
 // Configuration options for OpenAI provider
 #[derive(Debug, Clone)]
@@ -158,13 +158,26 @@ impl Provider for OpenAIProvider {
         
         if let Some(tool_calls) = &message.tool_calls {
             debug!("Received tool call response from OpenAI API");
-            // Convert tool calls into our message format
-            let mut content = String::new();
+            
+            // Create a Tool instance from each tool call
+            let mut results = Vec::new();
             for tool_call in tool_calls {
-                content.push_str(&format!("Tool call: {}\nParameters: {}\n", 
-                    tool_call.function.name,
-                    tool_call.function.arguments));
+                let tool = Tool::new(
+                    &tool_call.function.name,
+                    "", // Description not needed for execution
+                    serde_json::from_str(&tool_call.function.arguments)
+                        .map_err(|e| anyhow::anyhow!("Failed to parse tool arguments: {}", e))?,
+                    vec![], // Required params already validated by OpenAI
+                );
+                
+                // Execute the tool using the default toolkit
+                let toolkit = crate::toolkit::default::DefaultToolkit::new();
+                let result = toolkit.process_tool(&tool).await?;
+                results.push(result.text());
             }
+            
+            // Combine all results
+            let content = results.join("\n\n");
             Ok(Message::assistant(&content))
         } else if let Some(content) = &message.content {
             debug!("Received text response from OpenAI API");
@@ -219,24 +232,25 @@ mod tests {
         };
         let provider = OpenAIProvider::new(Some(options)).unwrap();
 
-        // Create a test tool
+        // Create a test tool using bash which is supported
         let tool = Tool::new(
-            "test_tool",
-            "A test tool",
+            "bash",
+            "Execute a bash command",
             serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "test_param": {
+                    "command": {
                         "type": "string",
-                        "description": "A test parameter"
+                        "description": "The command to execute"
                     }
-                }
+                },
+                "required": ["command"]
             }),
-            vec!["test_param".to_string()],
+            vec!["command".to_string()],
         );
 
         // Test conversation with tool
-        let messages = vec![Message::user("Use the test tool")];
+        let messages = vec![Message::user("Run the bash command")];
         let response = provider.generate(&messages, Some(vec![tool])).await?;
         
         // Response should contain either content or tool call info

@@ -148,12 +148,180 @@ impl Toolkit for DefaultToolkit {
     }
 
     async fn process_tool(&self, tool_call: &Tool) -> Result<Message> {
-        // The actual tool implementations will be handled by the Session
-        // This is just a placeholder that should never be called
-        Ok(Message::assistant(&format!(
-            "Default toolkit received tool call for {}", 
-            tool_call.name
-        )))
+        match tool_call.name.as_str() {
+            "bash" => {
+                let params = tool_call.parameters.as_object()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid parameters for bash tool"))?;
+                
+                let working_dir = params.get("working_dir")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                
+                let source_path = params.get("source_path")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                
+                let command = params.get("command")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                
+                // At least one parameter must be provided
+                if working_dir.is_none() && source_path.is_none() && command.is_none() {
+                    return Err(anyhow::anyhow!("At least one parameter must be provided for bash tool"));
+                }
+                
+                let mut cmd = std::process::Command::new("bash");
+                cmd.arg("-c");
+                
+                let mut script = String::new();
+                
+                if let Some(dir) = working_dir {
+                    script.push_str(&format!("cd \"{}\" && ", dir));
+                }
+                
+                if let Some(path) = source_path {
+                    script.push_str(&format!("source \"{}\" && ", path));
+                }
+                
+                if let Some(cmd_str) = command {
+                    script.push_str(&cmd_str);
+                }
+                
+                let output = cmd.arg(script)
+                    .output()
+                    .map_err(|e| anyhow::anyhow!("Failed to execute bash command: {}", e))?;
+                
+                let mut result = String::new();
+                
+                if !output.stdout.is_empty() {
+                    result.push_str(&String::from_utf8_lossy(&output.stdout));
+                }
+                
+                if !output.stderr.is_empty() {
+                    if !result.is_empty() {
+                        result.push_str("\n");
+                    }
+                    result.push_str(&String::from_utf8_lossy(&output.stderr));
+                }
+                
+                Ok(Message::assistant(&result))
+            },
+            
+            "text_editor" => {
+                let params = tool_call.parameters.as_object()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid parameters for text_editor tool"))?;
+                
+                let command = params.get("command")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Missing command parameter"))?;
+                
+                let path = params.get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Missing path parameter"))?;
+                
+                match command {
+                    "view" => {
+                        let content = std::fs::read_to_string(path)
+                            .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+                        
+                        if let Some(range) = params.get("view_range")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter()
+                                .filter_map(|v| v.as_i64())
+                                .collect::<Vec<_>>()) 
+                        {
+                            if range.len() == 2 {
+                                let lines: Vec<&str> = content.lines().collect();
+                                let start = (range[0] - 1).max(0) as usize;
+                                let end = range[1].min(lines.len() as i64) as usize;
+                                
+                                Ok(Message::assistant(&lines[start..end].join("\n")))
+                            } else {
+                                Err(anyhow::anyhow!("view_range must contain exactly 2 numbers"))
+                            }
+                        } else {
+                            Ok(Message::assistant(&content))
+                        }
+                    },
+                    
+                    "create" => {
+                        let content = params.get("file_text")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| anyhow::anyhow!("Missing file_text parameter"))?;
+                        
+                        std::fs::write(path, content)
+                            .map_err(|e| anyhow::anyhow!("Failed to write file: {}", e))?;
+                        
+                        Ok(Message::assistant(&format!("Created file {}", path)))
+                    },
+                    
+                    "str_replace" => {
+                        let old_str = params.get("old_str")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| anyhow::anyhow!("Missing old_str parameter"))?;
+                        
+                        let new_str = params.get("new_str")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        
+                        let content = std::fs::read_to_string(path)
+                            .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+                        
+                        let new_content = content.replace(old_str, new_str);
+                        
+                        std::fs::write(path, new_content)
+                            .map_err(|e| anyhow::anyhow!("Failed to write file: {}", e))?;
+                        
+                        Ok(Message::assistant(&format!("Replaced '{}' with '{}' in {}", old_str, new_str, path)))
+                    },
+                    
+                    "insert" => {
+                        let new_str = params.get("new_str")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| anyhow::anyhow!("Missing new_str parameter"))?;
+                        
+                        let insert_line = params.get("insert_line")
+                            .and_then(|v| v.as_i64())
+                            .ok_or_else(|| anyhow::anyhow!("Missing or invalid insert_line parameter"))?;
+                        
+                        let content = std::fs::read_to_string(path)
+                            .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+                        
+                        let mut lines: Vec<String> = content.lines().map(String::from).collect();
+                        if insert_line as usize > lines.len() {
+                            return Err(anyhow::anyhow!("insert_line is beyond end of file"));
+                        }
+                        
+                        lines.insert(insert_line as usize, new_str.to_string());
+                        let new_content = lines.join("\n");
+                        
+                        std::fs::write(path, new_content)
+                            .map_err(|e| anyhow::anyhow!("Failed to write file: {}", e))?;
+                        
+                        Ok(Message::assistant(&format!("Inserted '{}' after line {} in {}", new_str, insert_line, path)))
+                    },
+                    
+                    "undo_edit" => {
+                        // TODO: Implement undo functionality
+                        Err(anyhow::anyhow!("Undo functionality not yet implemented"))
+                    },
+                    
+                    _ => Err(anyhow::anyhow!("Unknown text_editor command: {}", command))
+                }
+            },
+            
+            "fetch_web_content" => {
+                // TODO: Implement web content fetching
+                Err(anyhow::anyhow!("Web content fetching not yet implemented"))
+            },
+            
+            "process_manager" => {
+                // TODO: Implement process management
+                Err(anyhow::anyhow!("Process management not yet implemented"))
+            },
+            
+            _ => Err(anyhow::anyhow!("Unknown tool: {}", tool_call.name))
+        }
     }
 }
 
@@ -184,10 +352,18 @@ mod tests {
     #[tokio::test]
     async fn test_default_toolkit_process() {
         let toolkit = DefaultToolkit::new();
-        let tools = toolkit.tools();
-        let tool = tools.first().unwrap();
         
-        let result = toolkit.process_tool(tool).await.unwrap();
-        assert!(result.text().contains(&tool.name));
+        // Test bash tool with echo command
+        let tool = Tool::new(
+            "bash",
+            "Test bash command",
+            serde_json::json!({
+                "command": "echo 'test'"
+            }),
+            vec!["command".to_string()],
+        );
+        
+        let result = toolkit.process_tool(&tool).await.unwrap();
+        assert_eq!(result.text().trim(), "test");
     }
 }

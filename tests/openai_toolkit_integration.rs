@@ -50,21 +50,21 @@ async fn create_test_provider() -> Result<OpenAIProvider> {
 
 #[tokio::test]
 async fn test_openai_toolkit_basic() -> Result<()> {
-    // Create a test tool
+    // Create a test tool using bash which is supported
     let tool = Tool::new(
-        "echo",
-        "A test tool that echoes input",
+        "bash",
+        "Execute a bash command",
         json!({
             "type": "object",
             "properties": {
-                "message": {
+                "command": {
                     "type": "string",
-                    "description": "Message to echo"
+                    "description": "The command to execute"
                 }
             },
-            "required": ["message"]
+            "required": ["command"]
         }),
-        vec!["message".to_string()],
+        vec!["command".to_string()],
     );
 
     let toolkit = TestToolkit {
@@ -75,7 +75,7 @@ async fn test_openai_toolkit_basic() -> Result<()> {
     
     // Test conversation prompting tool use
     let messages = vec![
-        Message::user("Please use the echo tool to say hello"),
+        Message::user("Please use the bash tool to run 'echo hello'"),
     ];
     
     let response = provider.generate(&messages, Some(toolkit.tools())).await?;
@@ -91,40 +91,39 @@ async fn test_openai_toolkit_multiple_tools() -> Result<()> {
     // Create multiple test tools
     let tools = vec![
         Tool::new(
-            "greet",
-            "A greeting tool",
+            "bash",
+            "Execute a bash command",
             json!({
                 "type": "object",
                 "properties": {
-                    "name": {
+                    "command": {
                         "type": "string",
-                        "description": "Name to greet"
+                        "description": "The command to execute"
                     }
                 },
-                "required": ["name"]
+                "required": ["command"]
             }),
-            vec!["name".to_string()],
+            vec!["command".to_string()],
         ),
         Tool::new(
-            "calculate",
-            "A simple calculator",
+            "text_editor",
+            "Perform text editing operations",
             json!({
                 "type": "object",
                 "properties": {
-                    "operation": {
+                    "command": {
                         "type": "string",
-                        "description": "Operation to perform",
-                        "enum": ["add", "subtract", "multiply", "divide"]
+                        "description": "The command to run",
+                        "enum": ["view", "create", "str_replace", "insert", "undo_edit"]
                     },
-                    "numbers": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Numbers to operate on"
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file"
                     }
                 },
-                "required": ["operation", "numbers"]
+                "required": ["command", "path"]
             }),
-            vec!["operation".to_string(), "numbers".to_string()],
+            vec!["command".to_string(), "path".to_string()],
         ),
     ];
 
@@ -133,7 +132,7 @@ async fn test_openai_toolkit_multiple_tools() -> Result<()> {
     
     // Test conversation requiring tool selection
     let messages = vec![
-        Message::user("Please greet Alice and then calculate 2 + 2"),
+        Message::user("Please run 'echo hello' using the bash tool and then view test.txt using the text_editor"),
     ];
     
     let response = provider.generate(&messages, Some(toolkit.tools())).await?;
